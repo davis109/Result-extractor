@@ -1,59 +1,78 @@
-# VTU Results Scraper
+# VTU Results Scraper Web Application
 
-This web application automates the process of extracting student results from the VTU results website and saves them to an Excel file.
+A web application for scraping and downloading VTU exam results. This application provides both automatic CAPTCHA solving (with a 2Captcha API key) and manual CAPTCHA entry options.
 
 ## Features
 
-- Automatically enters USN numbers
-- Manual CAPTCHA entry to ensure high success rate
-- Extracts subject-wise marks and student details
-- Saves all results to an Excel file
-- Web interface for easy access
+- Scrape VTU results for a range of USNs
+- Interactive mode for manual CAPTCHA entry
+- Automatic CAPTCHA solving (requires 2Captcha API key)
+- Export results to Excel
+- Mobile-friendly interface
+- Demo mode without Selenium
 
-## Local Setup
+## Deployment on Render
 
-1. Install the required packages:
-   ```
-   pip install -r requirements_web.txt
-   ```
+### Prerequisites
 
-2. Run the Flask app:
-   ```
-   python app.py
-   ```
+- A [Render](https://render.com) account
+- [Git](https://git-scm.com/downloads) installed on your computer
 
-3. Open your browser and navigate to `http://localhost:5000`
+### Steps to Deploy
 
-## Deployment Instructions
+1. **Prepare your repository**
 
-### Deploy to Render (100% Free)
+   Make sure your repository includes the following files:
+   - `vtu_results_hosted.py`
+   - `requirements.txt`
+   - `Procfile`
+   - `chrome-installer.sh`
+   - `runtime.txt`
+   - `templates/index.html`
+   - `templates/demo.html`
 
-1. Create a Render account at https://render.com/
+2. **Create a new Web Service on Render**
 
-2. Create a new Web Service:
-   - Connect your GitHub repository
-   - Name: `vtu-results-scraper` (or any name you prefer)
-   - Runtime: Python 3
-   - Build Command: `pip install -r requirements_web.txt`
-   - Start Command: `gunicorn app:app`
-   - Select the Free plan
+   - Log in to your [Render Dashboard](https://dashboard.render.com/)
+   - Click on "New" and select "Web Service"
+   - Connect your GitHub/GitLab repository or use the public repository URL
+   - Configure your web service with the following settings:
+     - **Name**: VTU Results Scraper (or any name you prefer)
+     - **Runtime**: Python
+     - **Build Command**: `pip install -r requirements.txt && bash chrome-installer.sh`
+     - **Start Command**: `gunicorn vtu_results_hosted:app`
+     - **Instance Type**: Free (or paid if you need more resources)
 
-3. Note that for the deployed version:
-   - A Chrome window needs to be visible for CAPTCHA entry
-   - You may need to use a service with a GUI environment for this to work
-   - Consider using your local computer for production use if CAPTCHA is needed
+3. **Configure Environment Variables**
 
-## Usage
+   Add the following environment variables:
+   - `FORCE_DEMO`: Set to `True` if you want to force demo mode
+   - `DEVELOPMENT`: Set to `True` for development features
+   - `MANUAL_CAPTCHA`: Set to `True` to enable manual CAPTCHA entry
 
-1. Enter the starting USN (e.g., 1AT22CS001)
-2. Enter the ending USN (e.g., 1AT22CS010)
-3. Click "Scrape Results"
-4. A Chrome browser window will open automatically
-5. Enter the CAPTCHA code shown in the browser window
-6. Click the Submit button in the browser
-7. Wait for the results to be processed
-8. Repeat for each USN in the range
-9. View and download the final results
+4. **Deploy the Service**
+
+   - Click "Create Web Service"
+   - Wait for the build and deployment process to complete
+
+5. **Access Your Web Application**
+
+   - After the deployment is complete, Render will provide a URL to access your web application
+   - Visit the URL to use your VTU Results Scraper
+
+## Local Development
+
+1. Clone the repository
+2. Install the requirements: `pip install -r requirements.txt`
+3. Run the application: `python vtu_results_hosted.py`
+4. Visit `http://localhost:5000` in your browser
+
+## Notes for Render Deployment
+
+- The free tier of Render may have limitations in terms of processing power and RAM
+- The Chrome installation may take some time during the build process
+- The application will run in manual CAPTCHA mode by default
+- Set `FORCE_DEMO=True` if you want to avoid the Selenium requirement
 
 ## Manual CAPTCHA vs Automatic Processing
 

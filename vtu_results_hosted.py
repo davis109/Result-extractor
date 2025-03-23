@@ -38,9 +38,20 @@ def setup_driver():
             chrome_options.add_argument("--no-sandbox")
             chrome_options.add_argument("--disable-dev-shm-usage")
             chrome_options.add_argument("--remote-debugging-port=9222")
+        else:
+            # Always add these options for more reliable operation in cloud environments
+            chrome_options.add_argument("--no-sandbox")
+            chrome_options.add_argument("--disable-dev-shm-usage")
         
         # Add window size to ensure visibility of elements
         chrome_options.add_argument("--window-size=1920,1080")
+        
+        # Check if we're running on Render.com
+        if os.environ.get('RENDER'):
+            print("Running on Render.com, using special configuration")
+            chrome_options.add_argument("--disable-extensions")
+            chrome_options.add_argument("--disable-setuid-sandbox")
+            chrome_options.binary_location = "/opt/google/chrome/chrome"
         
         # Detect operating system
         if sys.platform.startswith('win'):
@@ -54,7 +65,13 @@ def setup_driver():
                 driver = webdriver.Chrome(options=chrome_options)
         else:
             # Linux/Mac - likely running in a container
-            driver = webdriver.Chrome(options=chrome_options)
+            try:
+                service = Service(ChromeDriverManager().install())
+                driver = webdriver.Chrome(service=service, options=chrome_options)
+            except Exception as e:
+                print(f"Error with ChromeDriverManager: {str(e)}")
+                print("Trying direct Chrome initialization")
+                driver = webdriver.Chrome(options=chrome_options)
             
         print("Chrome WebDriver initialized successfully")
         return driver

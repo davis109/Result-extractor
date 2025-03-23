@@ -9,6 +9,7 @@ vtu_results_*.xlsx
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
 
 # Distribution / packaging
 dist/
@@ -17,8 +18,8 @@ build/
 
 # Virtual Environment
 venv/
-env/
 ENV/
+env/
 
 # IDE files
 .idea/
@@ -34,6 +35,7 @@ Thumbs.db
 __pycache__/
 *.py[cod]
 *$py.class
+*.so
 
 # Distribution / packaging
 .Python
@@ -49,6 +51,7 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
 *.egg-info/
 .installed.cfg
 *.egg
@@ -89,9 +92,19 @@ instance/
 
 # Excel files (except those needed for testing)
 *.xlsx
+*.xls
 
 # Selenium 
 geckodriver.log
 
 # Environment variables
-.env 
+.env
+.env.local
+
+# macOS
+.DS_Store
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini 
