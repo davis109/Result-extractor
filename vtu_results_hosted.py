@@ -25,6 +25,11 @@ API_KEY = "20480f95adb6216bc0e788f58c343c11"  # 2Captcha API key
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
+# Global variables to control processing flow
+SKIP_CURRENT_USN = False
+EXIT_PROCESSING = False
+LAST_EXCEL_FILENAME = None  # Track the last generated Excel file
+
 def setup_driver():
     """Set up and return a Chrome WebDriver instance."""
     try:
@@ -166,18 +171,54 @@ def solve_captcha(driver):
 
 def process_results(driver, usn_list, manual_mode=False):
     """Process results for a list of USNs."""
+    global SKIP_CURRENT_USN, EXIT_PROCESSING
+    
+    # Reset control flags at the start of processing
+    SKIP_CURRENT_USN = False
+    EXIT_PROCESSING = False
+    
     base_url = "https://results.vtu.ac.in/DJcbcs25/index.php"
     all_results = []
     processing_logs = []
     
-    for i, usn in enumerate(usn_list):
-        log_message = f"\nProcessing {usn} ({i+1}/{len(usn_list)})..."
+    i = 0
+    max_retries = 3  # Maximum number of CAPTCHA retries for each USN
+    retries = 0      # Current retry count
+    
+    while i < len(usn_list):
+        # Check if we should exit processing early
+        if EXIT_PROCESSING:
+            log_message = "Process terminated by user. Saving partial results."
+            print(log_message)
+            processing_logs.append(log_message)
+            break
+            
+        # Reset the skip flag for the new USN
+        if retries == 0:  # Only reset if we're not in retry mode
+            SKIP_CURRENT_USN = False
+        
+        usn = usn_list[i]
+        
+        # Show retry information if applicable
+        if retries > 0:
+            log_message = f"\nRetrying {usn} (Attempt {retries+1}/{max_retries+1})..."
+        else:
+            log_message = f"\nProcessing {usn} ({i+1}/{len(usn_list)})..."
+            
         print(log_message)
         processing_logs.append(log_message)
         
         # Navigate to the results page
-        driver.get(base_url)
-        time.sleep(2)  # Wait for page to load
+        try:
+            driver.get(base_url)
+            time.sleep(2)  # Wait for page to load
+        except Exception as e:
+            log_message = f"Error loading page: {str(e)}"
+            print(log_message)
+            processing_logs.append(log_message)
+            i += 1  # Move to next USN
+            retries = 0  # Reset retry counter
+            continue
         
         # Try different selectors for the USN input field
         usn_input = None
@@ -202,6 +243,8 @@ def process_results(driver, usn_list, manual_mode=False):
             log_message = f"Could not find USN input field for {usn} using any selector"
             print(log_message)
             processing_logs.append(log_message)
+            i += 1  # Move to next USN
+            retries = 0  # Reset retry counter
             continue
         
         # Enter USN
@@ -210,6 +253,15 @@ def process_results(driver, usn_list, manual_mode=False):
         log_message = f"Entered USN: {usn}"
         print(log_message)
         processing_logs.append(log_message)
+        
+        # Check if we should skip this USN
+        if SKIP_CURRENT_USN:
+            log_message = f"User requested to skip USN: {usn}"
+            print(log_message)
+            processing_logs.append(log_message)
+            i += 1  # Move to next USN
+            retries = 0  # Reset retry counter
+            continue
         
         # Find CAPTCHA input field
         captcha_input = None
@@ -222,6 +274,8 @@ def process_results(driver, usn_list, manual_mode=False):
             log_message = "Could not find CAPTCHA input field"
             print(log_message)
             processing_logs.append(log_message)
+            i += 1  # Move to next USN
+            retries = 0  # Reset retry counter
             continue
         
         captcha_text = None
@@ -243,14 +297,32 @@ def process_results(driver, usn_list, manual_mode=False):
             # Give focus to the CAPTCHA input field in the browser
             driver.execute_script("arguments[0].focus();", captcha_input)
             
-            # Set a timeout for manual input (60 seconds)
-            timeout = time.time() + 60
-            
             # Wait for the page to change (user submits the form)
             current_url = driver.current_url
             page_changed = False
-            while time.time() < timeout and not page_changed:
+            invalid_captcha = False
+            captcha_timeout = time.time() + 60
+            
+            while time.time() < captcha_timeout and not page_changed and not invalid_captcha:
                 try:
+                    # Check for alert (invalid captcha)
+                    try:
+                        alert = driver.switch_to.alert
+                        alert_text = alert.text
+                        log_message = f"Alert detected: {alert_text}"
+                        print(log_message)
+                        processing_logs.append(log_message)
+                        
+                        if "Invalid captcha" in alert_text:
+                            log_message = f"Invalid CAPTCHA detected for {usn}. Moving to next USN."
+                            print(log_message)
+                            processing_logs.append(log_message)
+                            alert.accept()  # Dismiss the alert
+                            invalid_captcha = True
+                    except:
+                        # No alert present, continue checking
+                        pass
+                    
                     # Check if the page has changed or if we're no longer on the CAPTCHA page
                     if current_url != driver.current_url or "captchacode" not in driver.page_source:
                         page_changed = True
@@ -263,13 +335,22 @@ def process_results(driver, usn_list, manual_mode=False):
                     log_message = f"Error checking page state: {str(e)}"
                     print(log_message)
                     processing_logs.append(log_message)
-                    break
+                    # Don't break here, just log the error and continue
+                    time.sleep(0.5)
             
+            # If invalid captcha was detected, move to next USN
+            if invalid_captcha:
+                i += 1  # Move to next USN
+                retries = 0  # Reset retry counter
+                continue
+                
             # If timeout was reached
             if not page_changed:
                 log_message = "Input timeout. Moving to next USN."
                 print(log_message)
                 processing_logs.append(log_message)
+                i += 1  # Move to next USN
+                retries = 0  # Reset retry counter
                 continue
             
             # If we got here, the user has submitted the form, we don't need to click the submit button
@@ -281,10 +362,22 @@ def process_results(driver, usn_list, manual_mode=False):
             
             # Check if we're still on the input page (CAPTCHA error)
             if "ENTER USN" in driver.page_source or "captchacode" in driver.page_source:
-                log_message = f"Still on input page. CAPTCHA may have been incorrect for {usn}"
-                print(log_message)
-                processing_logs.append(log_message)
-                continue
+                if retries < max_retries:
+                    retries += 1
+                    log_message = f"CAPTCHA validation failed for {usn}. Will retry (Attempt {retries+1}/{max_retries+1})."
+                    print(log_message)
+                    processing_logs.append(log_message)
+                    continue  # Retry the same USN
+                else:
+                    log_message = f"Maximum CAPTCHA retries ({max_retries+1}) reached for {usn}. Moving to next USN."
+                    print(log_message)
+                    processing_logs.append(log_message)
+                    i += 1  # Move to next USN
+                    retries = 0  # Reset retry counter
+                    continue
+            
+            # Reset retry counter as we've passed CAPTCHA validation
+            retries = 0
             
             # Continue to extract results
         else:
@@ -303,8 +396,10 @@ def process_results(driver, usn_list, manual_mode=False):
                 log_message = "Automatic CAPTCHA solving failed. Skipping this USN."
                 print(log_message)
                 processing_logs.append(log_message)
+                i += 1  # Move to next USN
+                retries = 0  # Reset retry counter
                 continue
-        
+            
             # Find and click the submit button
             try:
                 submit_button = driver.find_element(By.CSS_SELECTOR, "input[type='submit']")
@@ -316,6 +411,8 @@ def process_results(driver, usn_list, manual_mode=False):
                 log_message = "Could not find submit button"
                 print(log_message)
                 processing_logs.append(log_message)
+                i += 1  # Move to next USN
+                retries = 0  # Reset retry counter
                 continue
             
             # Wait for results page to load
@@ -326,10 +423,22 @@ def process_results(driver, usn_list, manual_mode=False):
             
             # Check if we're still on the input page (CAPTCHA error)
             if "ENTER USN" in driver.page_source or "captchacode" in driver.page_source:
-                log_message = f"Still on input page. CAPTCHA may have been incorrect for {usn}"
-                print(log_message)
-                processing_logs.append(log_message)
-                continue
+                if retries < max_retries:
+                    retries += 1
+                    log_message = f"CAPTCHA validation failed for {usn}. Will retry (Attempt {retries+1}/{max_retries+1})."
+                    print(log_message)
+                    processing_logs.append(log_message)
+                    continue  # Retry the same USN
+                else:
+                    log_message = f"Maximum CAPTCHA retries ({max_retries+1}) reached for {usn}. Moving to next USN."
+                    print(log_message)
+                    processing_logs.append(log_message)
+                    i += 1  # Move to next USN
+                    retries = 0  # Reset retry counter
+                    continue
+            
+            # Reset retry counter as we've passed CAPTCHA validation
+            retries = 0
         
         # Extract results
         try:
@@ -545,15 +654,21 @@ def process_results(driver, usn_list, manual_mode=False):
                 print(log_message)
                 processing_logs.append(log_message)
                 
+            # If we successfully extracted results, then increment i
+            i += 1
         except Exception as e:
             log_message = f"Error processing results for {usn}: {str(e)}"
             print(log_message)
             processing_logs.append(log_message)
+            i += 1  # Move to next USN
+            retries = 0  # Reset retry counter
     
     return all_results, processing_logs 
 
 def save_to_excel(all_results):
     """Save results to Excel file and return the filename."""
+    global LAST_EXCEL_FILENAME
+    
     if not all_results:
         print("\nNo results were collected!")
         return None
@@ -614,6 +729,9 @@ def save_to_excel(all_results):
     
     df.to_excel(excel_filename, index=False)
     print(f"\nResults successfully saved to {excel_filename}")
+    
+    # Save the filename globally
+    LAST_EXCEL_FILENAME = excel_filename
     
     return excel_filename 
 
@@ -786,7 +904,6 @@ def download_file(filename):
             'message': str(e)
         }), 500
 
-# Define a route for checking API key status
 @app.route('/api/check_api_key', methods=['GET'])
 def check_api_key():
     """Check if a valid 2Captcha API key is configured."""
@@ -798,10 +915,37 @@ def check_api_key():
         })
     else:
         return jsonify({
-            'status': 'success',
+            'status': 'success', 
             'message': '2Captcha API key is configured. Automatic CAPTCHA solving is available.',
             'api_key_configured': True
         })
+
+@app.route('/api/skip_usn', methods=['POST'])
+def skip_usn():
+    """Skip the currently processing USN."""
+    global SKIP_CURRENT_USN
+    SKIP_CURRENT_USN = True
+    return jsonify({
+        'status': 'success', 
+        'message': 'Current USN will be skipped'
+    })
+
+@app.route('/api/exit_process', methods=['POST'])
+def exit_process():
+    """Exit the current processing and save partial results."""
+    global EXIT_PROCESSING, LAST_EXCEL_FILENAME
+    EXIT_PROCESSING = True
+    
+    response_data = {
+        'status': 'success', 
+        'message': 'Processing will be terminated and partial results saved'
+    }
+    
+    # Include the filename if we have one
+    if LAST_EXCEL_FILENAME and os.path.exists(LAST_EXCEL_FILENAME):
+        response_data['filename'] = LAST_EXCEL_FILENAME
+    
+    return jsonify(response_data)
 
 @app.route('/demo', methods=['GET'])
 def demo():
