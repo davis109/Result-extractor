@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: vtu-results-scraper
+    env: python
+    buildCommand: pip install -r requirements_web.txt
+    startCommand: gunicorn app:app
+    plan: free
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.10.4 

@@ -1,60 +1,82 @@
 # VTU Results Scraper
 
-This script automates the process of extracting student results from the VTU results website and saves them to an Excel file.
+This web application automates the process of extracting student results from the VTU results website and saves them to an Excel file.
 
 ## Features
 
 - Automatically enters USN numbers
-- Can automatically solve CAPTCHAs with a 2Captcha API key
+- Manual CAPTCHA entry to ensure high success rate
 - Extracts subject-wise marks and student details
 - Saves all results to an Excel file
+- Web interface for easy access
 
-## Requirements
-
-- Python 3.6+
-- Chrome browser
-- ChromeDriver (automatically installed with selenium-manager)
-- Required Python packages (install using `pip install -r requirements.txt`)
-
-## Setup
+## Local Setup
 
 1. Install the required packages:
    ```
-   pip install -r requirements.txt
+   pip install -r requirements_web.txt
    ```
 
-2. For automatic CAPTCHA solving (optional):
-   - Sign up at [2Captcha](https://2captcha.com/)
-   - Get an API key
-   - Update the `API_KEY` variable in `selenium_vtu_results.py`
+2. Run the Flask app:
+   ```
+   python app.py
+   ```
+
+3. Open your browser and navigate to `http://localhost:5000`
+
+## Deployment Instructions
+
+### Deploy to Render (100% Free)
+
+1. Create a Render account at https://render.com/
+
+2. Create a new Web Service:
+   - Connect your GitHub repository
+   - Name: `vtu-results-scraper` (or any name you prefer)
+   - Runtime: Python 3
+   - Build Command: `pip install -r requirements_web.txt`
+   - Start Command: `gunicorn app:app`
+   - Select the Free plan
+
+3. Note that for the deployed version:
+   - A Chrome window needs to be visible for CAPTCHA entry
+   - You may need to use a service with a GUI environment for this to work
+   - Consider using your local computer for production use if CAPTCHA is needed
 
 ## Usage
 
-1. Run the script:
-   ```
-   python selenium_vtu_results.py
-   ```
+1. Enter the starting USN (e.g., 1AT22CS001)
+2. Enter the ending USN (e.g., 1AT22CS010)
+3. Click "Scrape Results"
+4. A Chrome browser window will open automatically
+5. Enter the CAPTCHA code shown in the browser window
+6. Click the Submit button in the browser
+7. Wait for the results to be processed
+8. Repeat for each USN in the range
+9. View and download the final results
 
-2. The script will:
-   - Open Chrome browser
-   - Navigate to the VTU results page
-   - Process USNs from 1AT22CS001 to 1AT22CS120
-   - Save results to an Excel file
+## Manual CAPTCHA vs Automatic Processing
 
-3. If you don't have a 2Captcha API key:
-   - You'll need to manually enter the CAPTCHA for each USN
-   - Press Enter in the terminal after submitting each form
-   - Type 'skip' to skip a USN
-   - Type 'exit' to stop the process and save results collected so far
+This application supports two modes:
+
+1. **Manual CAPTCHA (Default)**: 
+   - A Chrome browser window opens for you to enter the CAPTCHA manually
+   - Higher success rate as human verification passes CAPTCHA checks
+   - Requires user interaction for each USN
+
+2. **Automatic Processing** (Requires code modification):
+   - For development or testing purposes only
+   - Attempts to solve CAPTCHA automatically (low success rate)
+   - Can be enabled by changing `manual_captcha=True` to `False` in app.py
 
 ## Notes
 
-- The script respects the website by adding delays between requests
+- The application respects the website by adding delays between requests
 - Using automated CAPTCHA solving services may be against the website's terms of service
-- Use this script responsibly and for educational purposes only
+- Use this application responsibly and for educational purposes only
 
 ## Troubleshooting
 
-- If the script can't find the USN input field, try updating the selectors in the code
-- If the CAPTCHA solving fails, you can still enter it manually
-- If the script can't extract results, check if the website structure has changed 
+- If the browser window doesn't appear, check your Chrome installation
+- If the application fails to extract results, the website structure may have changed
+- For deployment issues, consider running the application locally with `python app.py` 

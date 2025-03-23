@@ -14,7 +14,7 @@ from selenium.webdriver.support import expected_conditions as EC
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 
 # 2Captcha API key - Replace with your actual API key
-API_KEY = "YOUR_2CAPTCHA_API_KEY"  # You need to sign up at 2captcha.com and get an API key
+API_KEY = "20480f95adb6216bc0e788f58c343c11"  # 2Captcha API key
 
 def setup_driver():
     """Set up and return a Chrome WebDriver instance."""
@@ -54,31 +54,59 @@ def solve_captcha(driver):
             "json": 1
         }
         
-        print("Sending CAPTCHA to solving service...")
-        response = requests.post("https://2captcha.com/in.php", data=data)
-        response_json = response.json()
-        
-        if response_json["status"] == 1:
-            request_id = response_json["request"]
+        print("Sending CAPTCHA to 2Captcha service...")
+        try:
+            response = requests.post("https://2captcha.com/in.php", data=data)
+            response_json = response.json()
             
-            # Wait for the CAPTCHA to be solved
-            for _ in range(30):  # Try for 30 seconds
-                time.sleep(5)
-                response = requests.get(f"https://2captcha.com/res.php?key={API_KEY}&action=get&id={request_id}&json=1")
-                response_json = response.json()
+            if response_json["status"] == 1:
+                request_id = response_json["request"]
+                print(f"CAPTCHA sent successfully. Request ID: {request_id}")
                 
-                if response_json["status"] == 1:
-                    captcha_text = response_json["request"]
-                    print(f"CAPTCHA solved: {captcha_text}")
-                    return captcha_text
-            
-            print("Timeout waiting for CAPTCHA solution")
-            return None
-        else:
-            print(f"Error sending CAPTCHA: {response_json['request']}")
+                # Wait for the CAPTCHA to be solved
+                print("Waiting for 2Captcha to solve the CAPTCHA...")
+                for attempt in range(30):  # Try for 30 attempts (about 150 seconds)
+                    time.sleep(5)
+                    try:
+                        get_url = f"https://2captcha.com/res.php?key={API_KEY}&action=get&id={request_id}&json=1"
+                        response = requests.get(get_url)
+                        response_json = response.json()
+                        
+                        if response_json["status"] == 1:
+                            captcha_text = response_json["request"]
+                            print(f"CAPTCHA solved: {captcha_text}")
+                            return captcha_text
+                        elif "CAPCHA_NOT_READY" in response_json["request"]:
+                            print(f"CAPTCHA not ready yet. Attempt {attempt+1}/30...")
+                        else:
+                            print(f"Error getting CAPTCHA solution: {response_json['request']}")
+                            return None
+                    except Exception as e:
+                        print(f"Error checking CAPTCHA solution: {str(e)}")
+                
+                print("Timeout waiting for CAPTCHA solution")
+                return None
+            else:
+                error_msg = response_json["request"]
+                print(f"Error sending CAPTCHA to 2Captcha: {error_msg}")
+                
+                if "ERROR_KEY_DOES_NOT_EXIST" in error_msg:
+                    print("The API key does not exist or is invalid. Please check your 2Captcha API key.")
+                elif "ERROR_ZERO_BALANCE" in error_msg:
+                    print("Your 2Captcha account has no balance. Please add funds to your account.")
+                elif "ERROR_NO_SLOT_AVAILABLE" in error_msg:
+                    print("No slots available on 2Captcha servers. Try again later.")
+                elif "ERROR_ZERO_CAPTCHA_FILESIZE" in error_msg:
+                    print("The CAPTCHA image could not be loaded or is empty.")
+                else:
+                    print("Unknown error from 2Captcha service. Check their documentation for more details.")
+                
+                return None
+        except Exception as e:
+            print(f"Error communicating with 2Captcha service: {str(e)}")
             return None
     except Exception as e:
-        print(f"Error solving CAPTCHA: {str(e)}")
+        print(f"Error preparing CAPTCHA for solving: {str(e)}")
         return None
 
 def process_results(driver, usn_list):
@@ -128,22 +156,40 @@ def process_results(driver, usn_list):
             print("Could not find CAPTCHA input field")
             continue
         
-        # Manual CAPTCHA entry
-        print("\n" + "-"*50)
-        print("ACTION REQUIRED: Please complete these steps in the browser:")
-        print("1. Enter the CAPTCHA shown in the image")
-        print("2. Click the Submit button")
-        print("-"*50)
+        # Try to solve CAPTCHA using 2Captcha
+        captcha_text = solve_captcha(driver)
         
-        user_input = input("After submitting, press Enter to continue (or type 'skip'/'exit'): ")
-        
-        if user_input.lower() == 'skip':
-            print(f"Skipping {usn}")
-            continue
+        if captcha_text:
+            print(f"Automatically solved CAPTCHA: {captcha_text}")
+            # Enter the CAPTCHA text
+            captcha_input.clear()
+            captcha_input.send_keys(captcha_text)
             
-        if user_input.lower() == 'exit':
-            print("Exiting the script")
-            break
+            # Find and click the submit button
+            try:
+                submit_button = driver.find_element(By.CSS_SELECTOR, "input[type='submit']")
+                submit_button.click()
+                print("Clicked submit button")
+            except NoSuchElementException:
+                print("Could not find submit button")
+                continue
+        else:
+            # Fall back to manual CAPTCHA entry if automatic solving fails
+            print("\n" + "-"*50)
+            print("Automatic CAPTCHA solving failed. Please complete these steps manually:")
+            print("1. Enter the CAPTCHA shown in the image")
+            print("2. Click the Submit button")
+            print("-"*50)
+            
+            user_input = input("After submitting, press Enter to continue (or type 'skip'/'exit'): ")
+            
+            if user_input.lower() == 'skip':
+                print(f"Skipping {usn}")
+                continue
+                
+            if user_input.lower() == 'exit':
+                print("Exiting the script")
+                break
         
         # Wait for results page to load
         print("Waiting for results page to load...")
@@ -405,26 +451,82 @@ def save_to_excel(all_results):
         print(f"Excel file saved but could not be opened automatically. Please open {excel_filename} manually.")
 
 def main():
+    # Global variable declaration
+    global API_KEY
+    
     # Ask user for USN range
     print("\nUSN Range Configuration")
     print("----------------------")
-    try:
-        start_num = int(input("Enter starting USN number (e.g., 1 for 1AT22CS001): ") or "1")
-        end_num = int(input("Enter ending USN number (e.g., 10 for 1AT22CS010): ") or "10")
+    
+    # Get starting USN number
+    while True:
+        start_input = input("Enter starting USN number (e.g., 1 for 1AT22CS001): ").strip()
         
-        if start_num < 1 or end_num > 120 or start_num > end_num:
-            print("Invalid range. Using default range 1-10.")
+        # Check if input is a full USN
+        if start_input.startswith("1AT22CS") and len(start_input) == 10:
+            try:
+                start_num = int(start_input[7:10])
+                break
+            except ValueError:
+                print("Invalid USN format. Please enter a number or a valid USN.")
+        # Check if input is just a number
+        elif start_input.isdigit():
+            start_num = int(start_input)
+            if 1 <= start_num <= 120:
+                break
+            else:
+                print("Number must be between 1 and 120.")
+        else:
+            print("Please enter a valid number or USN.")
             start_num = 1
-            end_num = 10
-    except ValueError:
-        print("Invalid input. Using default range 1-10.")
-        start_num = 1
-        end_num = 10
+            break
+    
+    # Get ending USN number
+    while True:
+        end_input = input("Enter ending USN number (e.g., 10 for 1AT22CS010): ").strip()
+        
+        # Check if input is a full USN
+        if end_input.startswith("1AT22CS") and len(end_input) == 10:
+            try:
+                end_num = int(end_input[7:10])
+                break
+            except ValueError:
+                print("Invalid USN format. Please enter a number or a valid USN.")
+        # Check if input is just a number
+        elif end_input.isdigit():
+            end_num = int(end_input)
+            if 1 <= end_num <= 120:
+                break
+            else:
+                print("Number must be between 1 and 120.")
+        else:
+            print("Please enter a valid number or USN.")
+            end_num = min(start_num + 9, 120)  # Default to 10 USNs or up to 120
+            break
+    
+    # Validate range
+    if start_num > end_num:
+        print(f"Starting number ({start_num}) is greater than ending number ({end_num}). Swapping values.")
+        start_num, end_num = end_num, start_num
+    
+    # Limit range to avoid too many requests
+    if end_num - start_num > 20:
+        print(f"Range too large ({end_num - start_num + 1} USNs). Limiting to 20 USNs.")
+        end_num = start_num + 19
     
     # Generate USN list
     usn_list = [f"1AT22CS{str(i).zfill(3)}" for i in range(start_num, end_num + 1)]
     
     print(f"\nWill process {len(usn_list)} USNs: from {usn_list[0]} to {usn_list[-1]}")
+    
+    # Check 2Captcha API key
+    if API_KEY == "20480f95adb6216bc0e788f58c343c11":
+        print("\nWARNING: The provided 2Captcha API key appears to be invalid.")
+        print("Automatic CAPTCHA solving will be disabled.")
+        print("You will need to enter CAPTCHAs manually.")
+        
+        # Temporarily disable the API key
+        API_KEY = ""
     
     print("\nSetting up the browser...")
     driver = setup_driver()
@@ -433,12 +535,22 @@ def main():
         print("\n" + "="*50)
         print("INSTRUCTIONS:")
         print("="*50)
-        print("1. The browser will open to the VTU results page")
-        print("2. For each USN, the script will enter the USN automatically")
-        print("3. You need to manually enter the CAPTCHA in the browser")
-        print("4. Click the Submit button in the browser")
-        print("5. After the results page loads, press Enter in the terminal")
-        print("6. Type 'skip' to skip a USN or 'exit' to stop the process")
+        
+        if API_KEY and API_KEY != "YOUR_2CAPTCHA_API_KEY":
+            print("1. The browser will open to the VTU results page")
+            print("2. For each USN, the script will enter the USN automatically")
+            print("3. The script will attempt to solve the CAPTCHA automatically using 2Captcha")
+            print("4. If automatic CAPTCHA solving fails, you'll be prompted to enter it manually")
+            print("5. After the results page loads, the script will extract and save the data")
+            print("6. Type 'skip' to skip a USN or 'exit' to stop the process when prompted")
+        else:
+            print("1. The browser will open to the VTU results page")
+            print("2. For each USN, the script will enter the USN automatically")
+            print("3. You need to manually enter the CAPTCHA in the browser")
+            print("4. Click the Submit button in the browser")
+            print("5. After the results page loads, press Enter in the terminal")
+            print("6. Type 'skip' to skip a USN or 'exit' to stop the process")
+        
         print("="*50)
         print("\nThe script will now start processing USNs...")
         print("="*50)
