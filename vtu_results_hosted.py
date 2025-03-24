@@ -7,6 +7,7 @@ import requests
 import json
 import traceback
 import sys
+import re
 from flask import Flask, request, jsonify, render_template, send_file, redirect, url_for
 from flask_cors import CORS
 from selenium import webdriver
@@ -1055,17 +1056,29 @@ def run_script():
             
         # If we're in demo mode or Selenium is not available, use demo data instead
         if os.environ.get('FORCE_DEMO') == 'True':
-            # Reuse the demo functionality
-            if start_usn.startswith("1AT22CS") and len(start_usn) == 10:
-                start_num = int(start_usn[7:10])
+            # Extract USN pattern and number
+            # Support for flexible USN formats like 1AT20CS001, 1AT21IS002, etc.
+            usn_pattern_match = re.match(r'(\d+[A-Z]{2}\d{2}[A-Z]{2})(\d{3})', start_usn)
+            
+            if usn_pattern_match:
+                usn_prefix = usn_pattern_match.group(1)  # e.g., 1AT22CS
+                start_num = int(usn_pattern_match.group(2))  # e.g., 001 as int
             else:
                 try:
                     start_num = int(start_usn)
+                    usn_prefix = "1AT22CS"  # Default prefix if only numbers provided
                 except ValueError:
                     return jsonify({'error': 'Invalid start USN format'}), 400
             
-            if end_usn.startswith("1AT22CS") and len(end_usn) == 10:
-                end_num = int(end_usn[7:10])
+            end_pattern_match = re.match(r'(\d+[A-Z]{2}\d{2}[A-Z]{2})(\d{3})', end_usn)
+            
+            if end_pattern_match:
+                end_prefix = end_pattern_match.group(1)
+                end_num = int(end_pattern_match.group(2))
+                
+                # Validate that prefixes match
+                if end_prefix != usn_prefix:
+                    return jsonify({'error': 'Start and end USN must have the same college, year, and branch codes'}), 400
             else:
                 try:
                     end_num = int(end_usn)
@@ -1075,7 +1088,7 @@ def run_script():
             # Create demo results
             sample_results = []
             for i in range(start_num, end_num + 1):
-                usn = f"1AT22CS{str(i).zfill(3)}"
+                usn = f"{usn_prefix}{str(i).zfill(3)}"
                 student = {
                     'USN': usn,
                     'Name': f"Demo Student {i}",
@@ -1098,7 +1111,6 @@ def run_script():
             })
         else:
             # Call the scrape function directly with the parameters
-            # Instead of modifying request.json, we'll call the scrape function with our parameters
             try:
                 # Setup driver
                 if interactive_mode:
@@ -1112,16 +1124,28 @@ def run_script():
                     }), 500
                 
                 # Parse USN numbers
-                if start_usn.startswith("1AT22CS") and len(start_usn) == 10:
-                    start_num = int(start_usn[7:10])
+                # Support for flexible USN formats
+                usn_pattern_match = re.match(r'(\d+[A-Z]{2}\d{2}[A-Z]{2})(\d{3})', start_usn)
+                
+                if usn_pattern_match:
+                    usn_prefix = usn_pattern_match.group(1)  # e.g., 1AT22CS
+                    start_num = int(usn_pattern_match.group(2))  # e.g., 001 as int
                 else:
                     try:
                         start_num = int(start_usn)
+                        usn_prefix = "1AT22CS"  # Default prefix if only numbers provided
                     except ValueError:
                         return jsonify({'error': 'Invalid start USN format'}), 400
                 
-                if end_usn.startswith("1AT22CS") and len(end_usn) == 10:
-                    end_num = int(end_usn[7:10])
+                end_pattern_match = re.match(r'(\d+[A-Z]{2}\d{2}[A-Z]{2})(\d{3})', end_usn)
+                
+                if end_pattern_match:
+                    end_prefix = end_pattern_match.group(1)
+                    end_num = int(end_pattern_match.group(2))
+                    
+                    # Validate that prefixes match for batch processing
+                    if end_prefix != usn_prefix:
+                        return jsonify({'error': 'Start and end USN must have the same college, year, and branch codes for batch processing'}), 400
                 else:
                     try:
                         end_num = int(end_usn)
@@ -1136,8 +1160,8 @@ def run_script():
                 if end_num - start_num > 10:
                     end_num = start_num + 10
                 
-                # Generate USN list
-                usn_list = [f"1AT22CS{str(i).zfill(3)}" for i in range(start_num, end_num + 1)]
+                # Generate USN list with the correct prefix
+                usn_list = [f"{usn_prefix}{str(i).zfill(3)}" for i in range(start_num, end_num + 1)]
                 
                 # Check if we should use manual mode (no automatic CAPTCHA solving)
                 manual_mode = interactive_mode or not API_KEY or API_KEY == "YOUR_2CAPTCHA_API_KEY"
@@ -1196,13 +1220,13 @@ def run_script():
                         else:
                             return jsonify({
                                 'status': 'error',
-                                'message': 'Failed to save results to Excel',
+                                'message': 'Failed to save results to Excel file',
                                 'logs': logs
                             }), 500
                     else:
                         return jsonify({
                             'status': 'error',
-                            'message': 'No results found. This could be due to website structure changes, network issues, or CAPTCHA failures.',
+                            'message': 'No results found',
                             'logs': logs
                         }), 400
                 finally:
@@ -1215,23 +1239,19 @@ def run_script():
                         print(f"Error closing driver: {str(e)}")
             except Exception as e:
                 error_details = traceback.format_exc()
-                print(f"Error processing results: {str(e)}")
+                print(f"Error in run_script: {str(e)}")
                 print(error_details)
                 return jsonify({
                     'status': 'error',
-                    'message': f"An unexpected error occurred: {str(e)}",
-                    'traceback': error_details
+                    'message': f'An unexpected error occurred: {str(e)}',
+                    'details': error_details
                 }), 500
-            
     except Exception as e:
-        error_details = traceback.format_exc()
-        print(f"Error in run_script endpoint: {str(e)}")
-        print(error_details)
+        print(f"Error processing request: {str(e)}")
         return jsonify({
             'status': 'error',
-            'message': f"An unexpected error occurred: {str(e)}",
-            'traceback': error_details
-        }), 500
+            'message': f'Error processing request: {str(e)}'
+        }), 400
 
 # Create template directory and index.html if not exists
 def create_template_files():
